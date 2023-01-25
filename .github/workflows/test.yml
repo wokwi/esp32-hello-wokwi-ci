@@ -1,0 +1,50 @@
+name: Test Hello World
+
+on: [push]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: espressif/idf:${{ matrix.idf }}
+      env:
+        IDF_TARGET: ${{ matrix.chip }}
+    strategy:
+      matrix:
+        idf: [v5.0, latest]
+        chip: [esp32, esp32c3]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Download Wokwi CLI
+        run: |
+          mkdir -p /opt/wokwi
+          curl "$RELEASE_URL" | tar zxf - -C /opt/wokwi
+        env:
+          RELEASE_URL: ${{ secrets.WOKWI_CI_RELEASE_URL }}
+      - name: Cache ccache data
+        uses: actions/cache@v3
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-idf${{ matrix.idf }}-${{ matrix.chip }}-hello
+          restore-keys: ${{ runner.os }}-ccache-idf${{ matrix.idf }}-${{ matrix.chip }}
+      - name: Build "hello_world"
+        run: |
+          . /opt/esp/idf/export.sh
+          cd /opt/esp/idf/examples/get-started/hello_world
+          idf.py uf2
+      - name: Simulate "hello_world"
+        run: |
+          timeout 60s /opt/wokwi/wokwi-esp32 --exit-on-reset --chip "${ESP_TARGET}" uf2 /opt/esp/idf/examples/get-started/hello_world/build/uf2.bin || ERROR_CODE="$?"
+          if [ "$ERROR_CODE" -eq 42 ]; then
+            # Exit code 42 means the program has reset the chip and the simulator exited
+            echo "Test passed!"
+            exit 0
+          else
+            echo "Test failed!"
+            exit -1
+          fi
+        env:
+          ESP_TARGET: ${{ matrix.chip }}
